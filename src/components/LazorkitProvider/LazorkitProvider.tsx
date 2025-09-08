@@ -6,7 +6,7 @@ export default function LazorkitAppProvider({ children }: { children: React.Reac
     return (
         <LazorkitProvider
             rpcUrl="https://api.devnet.solana.com"
-            paymasterUrl="https://lazorkit-paymaster.onrender.com"
+            paymasterUrl="https://kora-9do3.onrender.com"
             portalUrl="https://portal.lazor.sh"
             // rpcUrl={process.env.LAZORKIT_RPC_URL}
             // portalUrl={process.env.LAZORKIT_PORTAL_URL}
