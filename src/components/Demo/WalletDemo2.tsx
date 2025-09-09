@@ -15,6 +15,7 @@ export default function WalletDemo2() {
     const [isSending, setIsSending] = useState<boolean>(false);
     const [localError, setLocalError] = useState<string | null>(null);
     const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
+    const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
     const validateIfSystemTransfer = (ix: TransactionInstruction): string | null => {
         if (ix.programId.toBase58() !== SYSTEM_PROGRAM_ID) return null;
@@ -41,6 +42,30 @@ export default function WalletDemo2() {
         } catch (error) {
             console.error("Connection failed:", error);
         }
+    };
+    const validateHasWalletSigner = (ix: TransactionInstruction): string | null => {
+        const signerKeys = ix.keys.filter((k) => k.isSigner).map((k) => k.pubkey.toBase58());
+        if (signerKeys.length === 0) return null; // no signers required by this ix
+        if (!smartWalletPubkey) return "Wallet not connected.";
+        const has = signerKeys.includes(smartWalletPubkey.toBase58());
+        return has ? null : `Signer must include your connected wallet (${smartWalletPubkey.toBase58()}).`;
+    };
+
+    const validateIfSplToken = (ix: TransactionInstruction): string | null => {
+        if (ix.programId.toBase58() !== TOKEN_PROGRAM_ID) return null;
+        const d = ix.data as Buffer;
+        if (d.length < 1) return "Token instruction data is empty.";
+        const idx = d.readUInt8(0);
+        // Handle common Transfer (index = 3)
+        if (idx === 3) {
+            if (d.length !== 1 + 8) return "Token Transfer data must be 9 bytes (u8 index + u64 amount).";
+            if (ix.keys.length < 3) return "Token Transfer requires 3 accounts: [source, destination, authority].";
+            const [source, dest, auth] = ix.keys;
+            if (!source.isWritable) return "Source token account must be writable.";
+            if (!dest.isWritable) return "Destination token account must be writable.";
+            if (!auth.isSigner) return "Authority must be a signer.";
+        }
+        return null;
     };
     // 2. Parse instruction JSON and send
     const parseDataToBytes = (data: unknown): Buffer => {
@@ -128,7 +153,7 @@ export default function WalletDemo2() {
                     throw new Error("This demo supports sending one instruction per transaction. Provide a single instruction object.");
                 }
                 const ix = toInstruction(parsed[0]);
-                const err = validateIfSystemTransfer(ix);
+                const err = validateIfSystemTransfer(ix) || validateIfSplToken(ix) || validateHasWalletSigner(ix);
                 if (err) {
                     setLocalError(err);
                     return;
@@ -138,7 +163,7 @@ export default function WalletDemo2() {
                 console.log("Sent instruction:", sig);
             } else {
                 const ix = toInstruction(parsed);
-                const err = validateIfSystemTransfer(ix);
+                const err = validateIfSystemTransfer(ix) || validateIfSplToken(ix) || validateHasWalletSigner(ix);
                 if (err) {
                     setLocalError(err);
                     return;
