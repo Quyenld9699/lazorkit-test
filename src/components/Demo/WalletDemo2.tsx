@@ -1,6 +1,7 @@
 "use client";
+import { bs58 } from "@coral-xyz/anchor/dist/cjs/utils/bytes";
 import { useWallet } from "@lazorkit/wallet";
-import { PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import { Buffer } from "buffer";
 // Ensure Buffer is available globally in the browser
 if (typeof window !== "undefined" && !(window as any).Buffer) {
@@ -13,6 +14,25 @@ export default function WalletDemo2() {
     const [instructionJson, setInstructionJson] = useState<string>("");
     const [isSending, setIsSending] = useState<boolean>(false);
     const [localError, setLocalError] = useState<string | null>(null);
+    const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
+
+    const validateIfSystemTransfer = (ix: TransactionInstruction): string | null => {
+        if (ix.programId.toBase58() !== SYSTEM_PROGRAM_ID) return null;
+        // Require [from (signer+writable), to (writable)]
+        if (ix.keys.length < 2) return "System transfer requires 2 keys: [from, to].";
+        const from = ix.keys[0];
+        const to = ix.keys[1];
+        if (!from.isSigner || !from.isWritable) return "First key (from) must be signer and writable.";
+        if (!to.isWritable) return "Second key (to) must be writable.";
+        if (smartWalletPubkey && !from.pubkey.equals(smartWalletPubkey)) {
+            return `First key must match your smart wallet: ${smartWalletPubkey.toBase58()}`;
+        }
+        const data = ix.data as Buffer;
+        if (data.length !== 12) return "System transfer data must be 12 bytes (u32 index + u64 lamports).";
+        const index = data.readUInt32LE(0);
+        if (index !== 2) return "System transfer instruction index must be 2 (first 4 bytes LE).";
+        return null;
+    };
 
     const handleConnect = async () => {
         try {
@@ -51,6 +71,24 @@ export default function WalletDemo2() {
         throw new Error("Unsupported data format; use array, base64:, hex:, or utf8:");
     };
 
+    function logs() {
+        const instruction = SystemProgram.transfer({
+            fromPubkey: new PublicKey("7Hycp27MXUF2mPKLM55JcPF9b1ifsJohJEUN1d6vvcdt"),
+            toPubkey: new PublicKey("7BeWr6tVa1pYgrEddekYTnQENU22bBw9H8HYJUkbrN71"),
+            lamports: LAMPORTS_PER_SOL * 0.1,
+        });
+        const serialized = {
+            programId: instruction.programId.toBase58(),
+            keys: instruction.keys.map((k) => ({
+                pubkey: k.pubkey.toBase58(),
+                isSigner: k.isSigner,
+                isWritable: k.isWritable,
+            })),
+            data: bs58.encode(instruction.data),
+        };
+
+        console.log(JSON.stringify(serialized, null, 2));
+    }
     const toInstruction = (obj: any): TransactionInstruction => {
         if (!obj || typeof obj !== "object") throw new Error("Instruction must be an object");
         const programIdStr = obj.programId as string;
@@ -61,6 +99,10 @@ export default function WalletDemo2() {
             isSigner: !!k.isSigner,
             isWritable: !!k.isWritable,
         }));
+        // If no keys provided, include fee payer as a readonly signer for better compatibility
+        if (keys.length === 0 && smartWalletPubkey) {
+            keys.push({ pubkey: smartWalletPubkey, isSigner: true, isWritable: false });
+        }
         const data = parseDataToBytes(obj.data);
         return new TransactionInstruction({ programId, keys, data });
     };
@@ -81,10 +123,20 @@ export default function WalletDemo2() {
                     throw new Error("This demo supports sending one instruction per transaction. Provide a single instruction object.");
                 }
                 const ix = toInstruction(parsed[0]);
+                const err = validateIfSystemTransfer(ix);
+                if (err) {
+                    setLocalError(err);
+                    return;
+                }
                 const sig = await signAndSendTransaction(ix);
                 console.log("Sent instruction:", sig);
             } else {
                 const ix = toInstruction(parsed);
+                const err = validateIfSystemTransfer(ix);
+                if (err) {
+                    setLocalError(err);
+                    return;
+                }
                 const sig = await signAndSendTransaction(ix);
                 console.log("Sent instruction:", sig);
             }
@@ -97,6 +149,7 @@ export default function WalletDemo2() {
     };
     return (
         <div>
+            <button onClick={logs}>logs</button>
             <h2 style={{ fontSize: "30px", marginBottom: "30px" }}>LazorKit Wallet Demo 2</h2>
             {!isConnected ? (
                 <button
@@ -119,7 +172,7 @@ export default function WalletDemo2() {
 
             <div style={{ marginTop: "40px", display: "flex", flexDirection: "column", gap: "10px", maxWidth: 700 }}>
                 <textarea
-                    placeholder='{"programId":"MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr","keys":[],"data":"utf8:Hello from LazorKit"}\n\nNotes:\n- data supports prefixes: utf8:, hex:, base64: (default is base64 when no prefix).\n- one instruction per send.'
+                    placeholder='Example 1 (Memo):\n{"programId":"MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr","keys":[],"data":"utf8:Hello from LazorKit"}\n\nExample 2 (System transfer raw data, 0.1 SOL):\n{"programId":"11111111111111111111111111111111","keys":[{"pubkey":"<from>","isSigner":true,"isWritable":true},{"pubkey":"<to>","isSigner":false,"isWritable":true}],"data":"hex:0200000000e1f50500000000"}\n\nNotes:\n- data supports prefixes: utf8:, hex:, base64: (default base64 if no prefix).\n- When keys are omitted, your fee payer may be added as a readonly signer.'
                     value={instructionJson}
                     onChange={(e) => setInstructionJson(e.target.value)}
                     rows={8}
