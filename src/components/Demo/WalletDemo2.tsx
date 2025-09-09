@@ -61,9 +61,14 @@ export default function WalletDemo2() {
                 if (hex.length % 2 !== 0) throw new Error("Hex data length must be even");
                 return Buffer.from(hex, "hex");
             }
-            // default base64
+            // default base64 (supports base64url by normalizing and padding)
             try {
-                return Buffer.from(rest, "base64");
+                let b64 = rest.replace(/-/g, "+").replace(/_/g, "/");
+                const pad = b64.length % 4;
+                if (pad === 2) b64 += "==";
+                else if (pad === 3) b64 += "=";
+                else if (pad !== 0) throw new Error("Invalid base64 length");
+                return Buffer.from(b64, "base64");
             } catch (e) {
                 throw new Error("Invalid base64 data string");
             }
@@ -128,6 +133,7 @@ export default function WalletDemo2() {
                     setLocalError(err);
                     return;
                 }
+                console.log("Instruction accounts:", ix.keys.length, "data bytes:", (ix.data as Buffer).length);
                 const sig = await signAndSendTransaction(ix);
                 console.log("Sent instruction:", sig);
             } else {
@@ -137,6 +143,7 @@ export default function WalletDemo2() {
                     setLocalError(err);
                     return;
                 }
+                console.log("Instruction accounts:", ix.keys.length, "data bytes:", (ix.data as Buffer).length);
                 const sig = await signAndSendTransaction(ix);
                 console.log("Sent instruction:", sig);
             }
