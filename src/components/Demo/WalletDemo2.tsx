@@ -1,6 +1,11 @@
 "use client";
 import { useWallet } from "@lazorkit/wallet";
 import { PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { Buffer } from "buffer";
+// Ensure Buffer is available globally in the browser
+if (typeof window !== "undefined" && !(window as any).Buffer) {
+    (window as any).Buffer = Buffer;
+}
 import React, { useState } from "react";
 
 export default function WalletDemo2() {
@@ -18,9 +23,9 @@ export default function WalletDemo2() {
         }
     };
     // 2. Parse instruction JSON and send
-    const parseDataToBytes = (data: unknown): Uint8Array => {
-        if (data == null) return new Uint8Array();
-        if (Array.isArray(data)) return Uint8Array.from(data as number[]);
+    const parseDataToBytes = (data: unknown): Buffer => {
+        if (data == null) return Buffer.alloc(0);
+        if (Array.isArray(data)) return Buffer.from(Uint8Array.from(data as number[]));
         if (typeof data === "string") {
             const str = data as string;
             const hasPrefix = str.includes(":");
@@ -28,21 +33,17 @@ export default function WalletDemo2() {
             const prefix = prefixRaw.toLowerCase();
             const rest = restRaw;
             if (prefix === "utf8") {
-                return new TextEncoder().encode(rest);
+                return Buffer.from(rest, "utf8");
             }
             if (prefix === "hex") {
                 const hex = rest.startsWith("0x") ? rest.slice(2) : rest;
+                if (!/^[0-9a-fA-F]*$/.test(hex)) throw new Error("Invalid hex string");
                 if (hex.length % 2 !== 0) throw new Error("Hex data length must be even");
-                const out = new Uint8Array(hex.length / 2);
-                for (let i = 0; i < hex.length; i += 2) {
-                    out[i / 2] = parseInt(hex.slice(i, i + 2), 16);
-                }
-                return out;
+                return Buffer.from(hex, "hex");
             }
             // default base64
             try {
-                const binary = atob(rest);
-                return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+                return Buffer.from(rest, "base64");
             } catch (e) {
                 throw new Error("Invalid base64 data string");
             }
@@ -61,8 +62,7 @@ export default function WalletDemo2() {
             isWritable: !!k.isWritable,
         }));
         const data = parseDataToBytes(obj.data);
-        // Cast to Buffer to satisfy @solana/web3.js type expectations while providing Uint8Array at runtime
-        return new TransactionInstruction({ programId, keys, data: data as unknown as Buffer });
+        return new TransactionInstruction({ programId, keys, data });
     };
 
     const handleSendInstruction = async () => {
