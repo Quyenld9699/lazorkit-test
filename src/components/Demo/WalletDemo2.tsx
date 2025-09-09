@@ -1,5 +1,5 @@
 "use client";
-import { bs58 } from "@coral-xyz/anchor/dist/cjs/utils/bytes";
+import { base64, bs58 } from "@coral-xyz/anchor/dist/cjs/utils/bytes";
 import { useWallet } from "@lazorkit/wallet";
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import { Buffer } from "buffer";
@@ -73,7 +73,7 @@ export default function WalletDemo2() {
 
     function logs() {
         const instruction = SystemProgram.transfer({
-            fromPubkey: new PublicKey("7Hycp27MXUF2mPKLM55JcPF9b1ifsJohJEUN1d6vvcdt"),
+            fromPubkey: smartWalletPubkey!,
             toPubkey: new PublicKey("7BeWr6tVa1pYgrEddekYTnQENU22bBw9H8HYJUkbrN71"),
             lamports: LAMPORTS_PER_SOL * 0.1,
         });
@@ -84,7 +84,7 @@ export default function WalletDemo2() {
                 isSigner: k.isSigner,
                 isWritable: k.isWritable,
             })),
-            data: bs58.encode(instruction.data),
+            data: base64.encode(instruction.data),
         };
 
         console.log(JSON.stringify(serialized, null, 2));
@@ -149,7 +149,6 @@ export default function WalletDemo2() {
     };
     return (
         <div>
-            <button onClick={logs}>logs</button>
             <h2 style={{ fontSize: "30px", marginBottom: "30px" }}>LazorKit Wallet Demo 2</h2>
             {!isConnected ? (
                 <button
@@ -171,6 +170,10 @@ export default function WalletDemo2() {
             {(error || localError) && <p style={{ color: "red", marginTop: "20px" }}>Error: {localError ?? error?.message}</p>}
 
             <div style={{ marginTop: "40px", display: "flex", flexDirection: "column", gap: "10px", maxWidth: 700 }}>
+                <button onClick={logs} style={{ backgroundColor: "yellow" }}>
+                    logs
+                </button>
+
                 <textarea
                     placeholder='Example 1 (Memo):\n{"programId":"MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr","keys":[],"data":"utf8:Hello from LazorKit"}\n\nExample 2 (System transfer raw data, 0.1 SOL):\n{"programId":"11111111111111111111111111111111","keys":[{"pubkey":"<from>","isSigner":true,"isWritable":true},{"pubkey":"<to>","isSigner":false,"isWritable":true}],"data":"hex:0200000000e1f50500000000"}\n\nNotes:\n- data supports prefixes: utf8:, hex:, base64: (default base64 if no prefix).\n- When keys are omitted, your fee payer may be added as a readonly signer.'
                     value={instructionJson}
