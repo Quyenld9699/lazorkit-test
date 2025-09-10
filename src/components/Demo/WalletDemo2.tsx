@@ -1,7 +1,7 @@
 "use client";
 import { base64, bs58 } from "@coral-xyz/anchor/dist/cjs/utils/bytes";
 import { useWallet } from "@lazorkit/wallet";
-import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
+import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, TransactionInstruction, Transaction, Connection } from "@solana/web3.js";
 import { Buffer } from "buffer";
 // Ensure Buffer is available globally in the browser
 if (typeof window !== "undefined" && !(window as any).Buffer) {
@@ -10,10 +10,14 @@ if (typeof window !== "undefined" && !(window as any).Buffer) {
 import React, { useState } from "react";
 
 export default function WalletDemo2() {
-    const { connect, isConnecting, disconnect, isConnected, smartWalletPubkey, error, signAndSendTransaction } = useWallet();
+    const { connect, isConnecting, disconnect, isConnected, smartWalletPubkey, error, signAndSendTransaction, connection } = useWallet() as any; // assume hook exposes `connection`
     const [instructionJson, setInstructionJson] = useState<string>("");
     const [isSending, setIsSending] = useState<boolean>(false);
     const [localError, setLocalError] = useState<string | null>(null);
+    const [errorCategory, setErrorCategory] = useState<string | null>(null);
+    const [rpcLogs, setRpcLogs] = useState<string[] | null>(null);
+    const [lastInstructionDebug, setLastInstructionDebug] = useState<any | null>(null);
+    const [doSimulate, setDoSimulate] = useState<boolean>(true);
     const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
     const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
@@ -137,10 +141,42 @@ export default function WalletDemo2() {
         return new TransactionInstruction({ programId, keys, data });
     };
 
+    // Categorize different error sources for clearer feedback
+    const classifyError = (e: any): { category: string; message: string; logs?: string[] } => {
+        if (!e) return { category: "UNKNOWN", message: "Unknown error" };
+        // Wallet / signing library might wrap errors
+        const msg = (e.message || e.toString?.() || "").toString();
+        // Heuristic categories
+        if (msg.includes("Unexpected token") || msg.includes("JSON")) return { category: "PARSE_JSON", message: msg };
+        if (msg.includes("Unsupported data format") || msg.includes("Invalid base64") || msg.includes("Invalid hex")) return { category: "PARSE_DATA", message: msg };
+        if (msg.includes("Signer must include") || msg.includes("System transfer") || msg.includes("Token Transfer")) return { category: "PREVALIDATION", message: msg };
+        if (msg.includes("Transaction simulation failed")) {
+            // web3.js simulation error often attaches logs at e.logs
+            return { category: "SIMULATION", message: msg, logs: e.logs };
+        }
+        if (msg.includes("Blockhash") || msg.includes("signature verification failure")) return { category: "SIGNING", message: msg };
+        if (msg.includes("Invalid transaction")) return { category: "RPC_REJECT", message: msg };
+        // Generic network / RPC path
+        if (msg.toLowerCase().includes("rpc")) return { category: "RPC", message: msg };
+        return { category: "UNKNOWN", message: msg };
+    };
+
+    const simulateIx = async (ix: TransactionInstruction) => {
+        if (!connection || !smartWalletPubkey) return { ok: false, logs: ["No connection available"] };
+        const tx = new Transaction().add(ix);
+        tx.feePayer = smartWalletPubkey;
+        tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+        // We don't sign fully; partial simulation works without signatures if signers known
+        const sim = await connection.simulateTransaction(tx, { sigVerify: false });
+        return { ok: !sim.value.err, logs: sim.value.logs || [], err: sim.value.err };
+    };
+
     const handleSendInstruction = async () => {
         if (!smartWalletPubkey) return;
         try {
             setLocalError(null);
+            setErrorCategory(null);
+            setRpcLogs(null);
             if (!instructionJson.trim()) {
                 setLocalError("Please enter instruction JSON.");
                 return;
@@ -156,9 +192,31 @@ export default function WalletDemo2() {
                 const err = validateIfSystemTransfer(ix) || validateIfSplToken(ix) || validateHasWalletSigner(ix);
                 if (err) {
                     setLocalError(err);
+                    setErrorCategory("PREVALIDATION");
                     return;
                 }
                 console.log("Instruction accounts:", ix.keys.length, "data bytes:", (ix.data as Buffer).length);
+                setLastInstructionDebug({
+                    programId: ix.programId.toBase58(),
+                    keys: ix.keys.map((k) => ({ pubkey: k.pubkey.toBase58(), isSigner: k.isSigner, isWritable: k.isWritable })),
+                    dataBase64: base64.encode(ix.data as Buffer),
+                });
+                if (doSimulate) {
+                    try {
+                        const sim = await simulateIx(ix);
+                        console.log("Simulation logs:", sim.logs);
+                        if (!sim.ok) {
+                            setErrorCategory("SIMULATION");
+                            setLocalError(`Simulation failed: ${JSON.stringify(sim.err)}`);
+                            setRpcLogs(sim.logs || []);
+                            return; // abort send
+                        } else if (sim.logs && sim.logs.length) {
+                            setRpcLogs(sim.logs);
+                        }
+                    } catch (se) {
+                        console.warn("Simulation exception", se);
+                    }
+                }
                 const sig = await signAndSendTransaction(ix);
                 console.log("Sent instruction:", sig);
             } else {
@@ -166,15 +224,41 @@ export default function WalletDemo2() {
                 const err = validateIfSystemTransfer(ix) || validateIfSplToken(ix) || validateHasWalletSigner(ix);
                 if (err) {
                     setLocalError(err);
+                    setErrorCategory("PREVALIDATION");
                     return;
                 }
                 console.log("Instruction accounts:", ix.keys.length, "data bytes:", (ix.data as Buffer).length);
+                setLastInstructionDebug({
+                    programId: ix.programId.toBase58(),
+                    keys: ix.keys.map((k) => ({ pubkey: k.pubkey.toBase58(), isSigner: k.isSigner, isWritable: k.isWritable })),
+                    dataBase64: base64.encode(ix.data as Buffer),
+                });
+                if (doSimulate) {
+                    try {
+                        const sim = await simulateIx(ix);
+                        console.log("Simulation logs:", sim.logs);
+                        if (!sim.ok) {
+                            setErrorCategory("SIMULATION");
+                            setLocalError(`Simulation failed: ${JSON.stringify(sim.err)}`);
+                            setRpcLogs(sim.logs || []);
+                            return; // abort send
+                        } else if (sim.logs && sim.logs.length) {
+                            setRpcLogs(sim.logs);
+                        }
+                    } catch (se) {
+                        console.warn("Simulation exception", se);
+                    }
+                }
                 const sig = await signAndSendTransaction(ix);
                 console.log("Sent instruction:", sig);
             }
         } catch (e) {
             console.error("Send failed:", e);
-            setLocalError(e instanceof Error ? e.message : "Failed to send instruction(s)");
+            const { category, message, logs } = classifyError(e);
+            setErrorCategory(category);
+            setLocalError(message);
+            if (Array.isArray((e as any)?.logs)) setRpcLogs((e as any).logs);
+            else if (Array.isArray(logs)) setRpcLogs(logs);
         } finally {
             setIsSending(false);
         }
@@ -199,7 +283,18 @@ export default function WalletDemo2() {
                 </div>
             )}
 
-            {(error || localError) && <p style={{ color: "red", marginTop: "20px" }}>Error: {localError ?? error?.message}</p>}
+            {(error || localError) && (
+                <div style={{ color: "red", marginTop: "20px" }}>
+                    <p style={{ margin: 0 }}>Error: {localError ?? error?.message}</p>
+                    {errorCategory && <p style={{ margin: 0 }}>Category: {errorCategory}</p>}
+                    {rpcLogs && rpcLogs.length > 0 && (
+                        <details style={{ marginTop: "8px" }} open>
+                            <summary>RPC Logs ({rpcLogs.length})</summary>
+                            <pre style={{ whiteSpace: "pre-wrap", fontSize: "12px" }}>{rpcLogs.join("\n")}</pre>
+                        </details>
+                    )}
+                </div>
+            )}
 
             <div style={{ marginTop: "40px", display: "flex", flexDirection: "column", gap: "10px", maxWidth: 700 }}>
                 <button onClick={logs} style={{ backgroundColor: "yellow" }}>
@@ -213,6 +308,9 @@ export default function WalletDemo2() {
                     rows={8}
                     style={{ padding: "8px", width: "100%", border: "1px solid #ccc", borderRadius: "4px", fontFamily: "monospace" }}
                 />
+                <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input type="checkbox" checked={doSimulate} onChange={(e) => setDoSimulate(e.target.checked)} /> Simulate before send
+                </label>
                 <button
                     onClick={handleSendInstruction}
                     disabled={!isConnected || !instructionJson.trim() || isSending}
@@ -227,6 +325,12 @@ export default function WalletDemo2() {
                 >
                     {isSending ? "Sending..." : "Send Instruction(s)"}
                 </button>
+                {lastInstructionDebug && (
+                    <details style={{ marginTop: "12px" }}>
+                        <summary>Last Instruction Debug</summary>
+                        <pre style={{ fontSize: "12px", whiteSpace: "pre-wrap" }}>{JSON.stringify(lastInstructionDebug, null, 2)}</pre>
+                    </details>
+                )}
             </div>
         </div>
     );
