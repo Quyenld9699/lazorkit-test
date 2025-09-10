@@ -1,16 +1,19 @@
 "use client";
 import { base64, bs58 } from "@coral-xyz/anchor/dist/cjs/utils/bytes";
 import { useWallet } from "@lazorkit/wallet";
-import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, TransactionInstruction, Transaction, Connection } from "@solana/web3.js";
+import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, TransactionInstruction, Transaction, Connection, VersionedTransaction, TransactionMessage } from "@solana/web3.js";
 import { Buffer } from "buffer";
 // Ensure Buffer is available globally in the browser
 if (typeof window !== "undefined" && !(window as any).Buffer) {
     (window as any).Buffer = Buffer;
 }
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 
 export default function WalletDemo2() {
-    const { connect, isConnecting, disconnect, isConnected, smartWalletPubkey, error, signAndSendTransaction, connection } = useWallet() as any; // assume hook exposes `connection`
+    const { connect, isConnecting, disconnect, isConnected, smartWalletPubkey, error, signAndSendTransaction } = useWallet();
+    // Fallback endpoint + connection (wallet hook doesn't expose connection)
+    const [endpoint, setEndpoint] = useState<string>("https://api.devnet.solana.com");
+    const fallbackConnection = useMemo(() => new Connection(endpoint, { commitment: "confirmed" }), [endpoint]);
     const [instructionJson, setInstructionJson] = useState<string>("");
     const [isSending, setIsSending] = useState<boolean>(false);
     const [localError, setLocalError] = useState<string | null>(null);
@@ -162,13 +165,23 @@ export default function WalletDemo2() {
     };
 
     const simulateIx = async (ix: TransactionInstruction) => {
-        if (!connection || !smartWalletPubkey) return { ok: false, logs: ["No connection available"] };
-        const tx = new Transaction().add(ix);
-        tx.feePayer = smartWalletPubkey;
-        tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-        // We don't sign fully; partial simulation works without signatures if signers known
-        const sim = await connection.simulateTransaction(tx, { sigVerify: false });
-        return { ok: !sim.value.err, logs: sim.value.logs || [], err: sim.value.err };
+        if (!smartWalletPubkey) return { ok: false, logs: ["No wallet public key"] };
+        try {
+            const conn = fallbackConnection;
+            const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
+            // Build a v0 message (even single ix)
+            const msg = new TransactionMessage({
+                payerKey: smartWalletPubkey,
+                recentBlockhash: blockhash,
+                instructions: [ix],
+            }).compileToV0Message();
+            const vtx = new VersionedTransaction(msg);
+            // No signatures required for simulation; config can disable sig verify
+            const sim = await conn.simulateTransaction(vtx, { sigVerify: false });
+            return { ok: !sim.value.err, logs: sim.value.logs || [], err: sim.value.err };
+        } catch (e: any) {
+            return { ok: false, logs: [e?.message || "Simulation threw"], err: e };
+        }
     };
 
     const handleSendInstruction = async () => {
@@ -196,10 +209,19 @@ export default function WalletDemo2() {
                     return;
                 }
                 console.log("Instruction accounts:", ix.keys.length, "data bytes:", (ix.data as Buffer).length);
+                // Extra decode for SystemProgram transfer
+                let decoded: any = null;
+                if (ix.programId.toBase58() === SYSTEM_PROGRAM_ID && (ix.data as Buffer).length === 12) {
+                    const buf = ix.data as Buffer;
+                    const idx = buf.readUInt32LE(0);
+                    const lamports = Number(buf.readBigUInt64LE(4));
+                    decoded = { index: idx, lamports };
+                }
                 setLastInstructionDebug({
                     programId: ix.programId.toBase58(),
                     keys: ix.keys.map((k) => ({ pubkey: k.pubkey.toBase58(), isSigner: k.isSigner, isWritable: k.isWritable })),
                     dataBase64: base64.encode(ix.data as Buffer),
+                    decoded,
                 });
                 if (doSimulate) {
                     try {
@@ -228,10 +250,18 @@ export default function WalletDemo2() {
                     return;
                 }
                 console.log("Instruction accounts:", ix.keys.length, "data bytes:", (ix.data as Buffer).length);
+                let decoded: any = null;
+                if (ix.programId.toBase58() === SYSTEM_PROGRAM_ID && (ix.data as Buffer).length === 12) {
+                    const buf = ix.data as Buffer;
+                    const idx = buf.readUInt32LE(0);
+                    const lamports = Number(buf.readBigUInt64LE(4));
+                    decoded = { index: idx, lamports };
+                }
                 setLastInstructionDebug({
                     programId: ix.programId.toBase58(),
                     keys: ix.keys.map((k) => ({ pubkey: k.pubkey.toBase58(), isSigner: k.isSigner, isWritable: k.isWritable })),
                     dataBase64: base64.encode(ix.data as Buffer),
+                    decoded,
                 });
                 if (doSimulate) {
                     try {
@@ -308,6 +338,10 @@ export default function WalletDemo2() {
                     rows={8}
                     style={{ padding: "8px", width: "100%", border: "1px solid #ccc", borderRadius: "4px", fontFamily: "monospace" }}
                 />
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <label style={{ fontSize: 12 }}>RPC Endpoint (fallback for simulation)</label>
+                    <input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} style={{ padding: 4, fontFamily: "monospace", border: "1px solid #ccc", borderRadius: 4 }} />
+                </div>
                 <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <input type="checkbox" checked={doSimulate} onChange={(e) => setDoSimulate(e.target.checked)} /> Simulate before send
                 </label>
