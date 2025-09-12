@@ -1,7 +1,7 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
-import { PublicKey } from "@solana/web3.js";
+import { useEffect, useState } from "react";
 import { useWallet } from "@lazorkit/wallet";
+import { useRouter } from "next/navigation";
 
 type Currency = "USD" | "EUR" | "VND";
 const pools = [
@@ -18,6 +18,7 @@ async function api(path: string, init?: RequestInit) {
 
 export default function PayPage() {
     const { connect, disconnect, isConnected, isConnecting, smartWalletPubkey } = useWallet();
+    const router = useRouter();
     const [amount, setAmount] = useState<number>(0);
     const [currency, setCurrency] = useState<Currency>("VND");
     const [usdt, setUsdt] = useState<number>(0);
@@ -46,22 +47,18 @@ export default function PayPage() {
         if (!walletBase58) throw new Error("Connect wallet first");
         setLoading(true);
         try {
+            const origin = window.location.origin;
+            const successUrl = `${origin}/pay/success`;
+            const cancelUrl = `${origin}/pay/cancel`;
             const order = await api("/api/a/orders", {
                 method: "POST",
-                body: JSON.stringify({ amountFiat: amount, currency, poolId: pool, wallet: walletBase58, usdtAmount: usdt }),
+                body: JSON.stringify({ amountFiat: amount, currency, poolId: pool, wallet: walletBase58, usdtAmount: usdt, successUrl, cancelUrl }),
             });
             const pid: string = order.payment_id;
             setIntentId(pid);
             setStatus("awaiting_payment");
-            // DEV-ONLY: drive B state via A dev endpoints
-            setTimeout(async () => {
-                await api(`/api/a/orders/${pid}/pay`, { method: "POST" });
-                setStatus("paid");
-            }, 1200);
-            setTimeout(async () => {
-                const st = await api(`/api/a/orders/${pid}/settle`, { method: "POST" });
-                setStatus(st.status);
-            }, 3000);
+            // Redirect to provider B hosted page (mock)
+            router.push(`/b/pay/${pid}`);
         } catch (e: any) {
             alert(e?.message || "failed to create intent");
         } finally {

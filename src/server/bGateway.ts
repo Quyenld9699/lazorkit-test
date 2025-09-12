@@ -2,7 +2,7 @@
 // For now, this mocks B using our in-memory store, so A's API routes only
 // call these functions. Later, replace internals with real HTTP requests to B.
 
-import { Currency, PaymentIntent, PaymentStatus, createIntent, getIntent, quoteFiatToUsdt, markPaid, settleIntent } from "@/lib/mockStore";
+import { Currency, PaymentIntent, PaymentStatus, createIntent, getIntent, quoteFiatToUsdt, markPaid, settleIntent, cancelIntent } from "@/lib/mockStore";
 
 export type CreateOrderInput = {
     amountFiat: number;
@@ -23,6 +23,8 @@ export type Order = {
     pool_id: string;
     beneficiary_wallet: string;
     tx_signature?: string;
+    success_url?: string;
+    cancel_url?: string;
 };
 
 export async function B_getQuote(amount: number, currency: Currency) {
@@ -60,6 +62,11 @@ export async function B_devSettle(paymentId: string): Promise<Order | null> {
     return i ? mapIntentToOrder(i) : null;
 }
 
+export async function B_devCancel(paymentId: string): Promise<Order | null> {
+    const i = cancelIntent(paymentId);
+    return i ? mapIntentToOrder(i) : null;
+}
+
 function mapIntentToOrder(i: PaymentIntent): Order {
     return {
         payment_id: i.id,
@@ -70,5 +77,7 @@ function mapIntentToOrder(i: PaymentIntent): Order {
         pool_id: i.poolId,
         beneficiary_wallet: i.wallet || "",
         tx_signature: i.txSig,
+        success_url: i.successUrl,
+        cancel_url: i.cancelUrl,
     };
 }
