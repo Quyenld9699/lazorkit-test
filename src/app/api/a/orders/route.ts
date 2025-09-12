@@ -1,7 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { B_createOrder } from "@/server/bGateway";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
     const body = await req.json();
     const { amountFiat, currency, poolId, wallet, successUrl, cancelUrl, usdtAmount } = body || {};
     if (typeof amountFiat !== "number" || !currency || !poolId || !wallet) {

@@ -1,7 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createIntent } from "@/lib/mockStore";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const { amountFiat, currency, poolId, wallet, successUrl, cancelUrl } = body || {};
     if (typeof amountFiat !== "number" || !currency || !poolId) {
