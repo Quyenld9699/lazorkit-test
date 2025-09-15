@@ -23,6 +23,7 @@ export default function WalletDemo() {
         createPasskeyOnly, // () => Promise<ConnectResponse> - Create passkey only
         createSmartWalletOnly, // (passkeyData: ConnectResponse) => Promise<{smartWalletAddress: string, account: WalletAccount}>
         // reconnect, // () => Promise<WalletAccount> - Reconnect using stored credentials
+        wallet,
     } = useWallet();
 
     // 1. Connect wallet (tries auto-reconnect first)

@@ -10,7 +10,7 @@ if (typeof window !== "undefined" && !(window as any).Buffer) {
 import React, { useState, useMemo } from "react";
 
 export default function WalletDemo2() {
-    const { connect, isConnecting, disconnect, isConnected, smartWalletPubkey, error, signAndSendTransaction } = useWallet();
+    const { connect, isConnecting, disconnect, isConnected, smartWalletPubkey, error, signAndSendTransaction, createPasskeyOnly, wallet } = useWallet();
     // Fallback endpoint + connection (wallet hook doesn't expose connection)
     const [endpoint, setEndpoint] = useState<string>("https://api.devnet.solana.com");
     const fallbackConnection = useMemo(() => new Connection(endpoint, { commitment: "confirmed" }), [endpoint]);
@@ -293,9 +293,25 @@ export default function WalletDemo2() {
             setIsSending(false);
         }
     };
+
+    async function createPasskeysAndLogs() {
+        try {
+            const resp = await createPasskeyOnly();
+            console.log("Passkey created:", resp);
+        } catch (e) {
+            console.error("Create passkey failed:", e);
+        }
+    }
+
     return (
         <div>
             <h2 style={{ fontSize: "30px", marginBottom: "30px" }}>LazorKit Wallet Demo 2</h2>
+
+            <button style={{ padding: "10px 16px", background: "#fabc45" }} onClick={createPasskeysAndLogs}>
+                Create Passkeys only
+            </button>
+            <button onClick={() => console.log({ wallet, smartWalletPubkey })}>Logs</button>
+
             {!isConnected ? (
                 <button
                     style={{ padding: "10px 16px", background: isConnecting ? "#9e9e9e" : "#03a9f4", borderRadius: "10px", color: "white", cursor: isConnecting ? "not-allowed" : "pointer" }}
