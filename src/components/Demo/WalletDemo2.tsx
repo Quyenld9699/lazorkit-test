@@ -8,9 +8,24 @@ if (typeof window !== "undefined" && !(window as any).Buffer) {
     (window as any).Buffer = Buffer;
 }
 import React, { useState, useMemo } from "react";
+import { Button } from "../ui/button";
 
 export default function WalletDemo2() {
-    const { connect, isConnecting, disconnect, isConnected, smartWalletPubkey, error, signAndSendTransaction, createPasskeyOnly, wallet } = useWallet();
+    const {
+        connect,
+        isConnecting,
+        isConnected,
+        smartWalletPubkey,
+        wallet,
+        error,
+        disconnect,
+        isSmartWalletReady,
+        getSmartWalletByPasskey,
+        getCurrentSmartWallet,
+        getSmartWalletStatus,
+        signAndSendTransaction,
+        connectPasskey,
+    } = useWallet();
     // Fallback endpoint + connection (wallet hook doesn't expose connection)
     const [endpoint, setEndpoint] = useState<string>("https://api.devnet.solana.com");
     const fallbackConnection = useMemo(() => new Connection(endpoint, { commitment: "confirmed" }), [endpoint]);
@@ -294,12 +309,51 @@ export default function WalletDemo2() {
         }
     };
 
-    async function createPasskeysAndLogs() {
+    async function connectPassk() {
         try {
-            const resp = await createPasskeyOnly();
-            console.log("Passkey created:", resp);
-        } catch (e) {
-            console.error("Create passkey failed:", e);
+            const data = await connectPasskey();
+            console.log("data", data);
+        } catch (error) {
+            console.error("Error connect passkey:", error);
+        }
+    }
+
+    async function testSmartWalletStatus() {
+        try {
+            const status = await getSmartWalletStatus();
+            console.log("Smart wallet status:", status);
+        } catch (error) {
+            console.error("Error get smart wallet status:", error);
+        }
+    }
+
+    async function checkIsSmartWalletReady() {
+        try {
+            const isReady = await isSmartWalletReady();
+            console.log("Is smart wallet ready:", isReady);
+        } catch (error) {
+            console.error("Error check is smart wallet ready:", error);
+        }
+    }
+
+    async function testGetCurrentSmartWallet() {
+        try {
+            const response = await getCurrentSmartWallet();
+            console.log("Current smart wallet:", {
+                smartWallet: response.smartWallet?.toString(),
+                walletDevice: response.walletDevice?.toString(),
+            });
+        } catch (error) {
+            console.error("Error get current smart wallet:", error);
+        }
+    }
+
+    async function testConnect() {
+        try {
+            const res = await connect();
+            console.log("Connect wallet success:", res);
+        } catch (error) {
+            console.error("Error connect wallet:", error);
         }
     }
 
@@ -307,10 +361,39 @@ export default function WalletDemo2() {
         <div>
             <h2 style={{ fontSize: "30px", marginBottom: "30px" }}>LazorKit Wallet Demo 2</h2>
 
-            <button style={{ padding: "10px 16px", background: "#fabc45" }} onClick={createPasskeysAndLogs}>
-                Create Passkeys only
-            </button>
-            <button onClick={() => console.log({ wallet, smartWalletPubkey })}>Logs</button>
+            <div>
+                <Button variant={"secondary"} onClick={logs}>
+                    Logs wallet
+                </Button>
+            </div>
+
+            <div className="mt-2">
+                <Button variant={"default"} onClick={connectPassk}>
+                    Connect passkey
+                </Button>
+            </div>
+
+            <div className="mt-2">
+                <Button variant={"default"} onClick={testSmartWalletStatus}>
+                    Test smart wallet status
+                </Button>
+            </div>
+            <div className="mt-2">
+                <Button variant={"default"} onClick={checkIsSmartWalletReady}>
+                    Check isSmartWalletReady
+                </Button>
+            </div>
+            <div className="mt-2">
+                <Button variant={"default"} onClick={testGetCurrentSmartWallet}>
+                    Get current smart wallet
+                </Button>
+            </div>
+            <div className="mt-2">
+                <p>Smart wallet: {smartWalletPubkey?.toString() || "null"}</p>
+                <Button onClick={testConnect}>Test connect wallet (have create smartwallet)</Button>
+            </div>
+
+            <button onClick={() => console.log({ wallet, smartWalletPubkey, isConnected })}>Logs</button>
 
             {!isConnected ? (
                 <button
