@@ -20,8 +20,6 @@ export default function WalletDemo() {
         signAndSendTransaction, // (instruction: TransactionInstruction) => Promise<string>
 
         // New methods for flexible workflows
-        createPasskeyOnly, // () => Promise<ConnectResponse> - Create passkey only
-        createSmartWalletOnly, // (passkeyData: ConnectResponse) => Promise<{smartWalletAddress: string, account: WalletAccount}>
         // reconnect, // () => Promise<WalletAccount> - Reconnect using stored credentials
         wallet,
     } = useWallet();
