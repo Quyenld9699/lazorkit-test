@@ -24,6 +24,8 @@ export default function WalletDemo2() {
         getCurrentSmartWallet,
         getSmartWalletStatus,
         signAndSendTransaction,
+        buildSmartWalletTransaction,
+        buildDirectTransaction,
         connectPasskey,
     } = useWallet();
     // Fallback endpoint + connection (wallet hook doesn't expose connection)
@@ -35,7 +37,12 @@ export default function WalletDemo2() {
     const [errorCategory, setErrorCategory] = useState<string | null>(null);
     const [rpcLogs, setRpcLogs] = useState<string[] | null>(null);
     const [lastInstructionDebug, setLastInstructionDebug] = useState<any | null>(null);
-    const [doSimulate, setDoSimulate] = useState<boolean>(true);
+    const [doSimulate, setDoSimulate] = useState<boolean>(false);
+    // Payer input (as base58 string)
+    const [payerStr, setPayerStr] = useState<string>("");
+    // Built transactions (base64) for preview
+    const [lastBuiltSmartWalletTxB64, setLastBuiltSmartWalletTxB64] = useState<string | null>(null);
+    const [lastBuiltDirectTxB64, setLastBuiltDirectTxB64] = useState<string | null>(null);
     const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
     const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
@@ -309,6 +316,96 @@ export default function WalletDemo2() {
         }
     };
 
+    // Helpers to parse instructionJson into one instruction
+    const parseSingleInstruction = (): TransactionInstruction => {
+        if (!instructionJson.trim()) throw new Error("Please enter instruction JSON.");
+        const parsed = JSON.parse(instructionJson.trim());
+        if (Array.isArray(parsed)) {
+            if (parsed.length !== 1) throw new Error("Provide a single instruction (array of length 1).");
+            return toInstruction(parsed[0]);
+        }
+        return toInstruction(parsed);
+    };
+
+    const getPayerKey = (): PublicKey => {
+        try {
+            if (payerStr && payerStr.trim().length > 0) return new PublicKey(payerStr.trim());
+        } catch (e) {
+            throw new Error("Invalid payer public key string");
+        }
+        if (!smartWalletPubkey) throw new Error("Wallet not connected and no payer provided");
+        return smartWalletPubkey;
+    };
+
+    // Convert a variety of outputs to base64 for display
+    const txLikeToBase64 = (res: any): string => {
+        const maybeTx = res?.transaction ?? res?.tx ?? res;
+        try {
+            if (maybeTx && typeof maybeTx.serialize === "function") {
+                const bytes = maybeTx.serialize();
+                const buf = bytes instanceof Uint8Array ? Buffer.from(bytes) : Buffer.from(bytes as any);
+                return base64.encode(buf);
+            }
+            if (maybeTx instanceof Uint8Array) return base64.encode(Buffer.from(maybeTx));
+            if (Buffer.isBuffer(maybeTx)) return base64.encode(maybeTx as any);
+            if (typeof maybeTx === "string") return maybeTx; // assume already base64
+            // Last resort: stringify
+            return base64.encode(Buffer.from(JSON.stringify(res)));
+        } catch {
+            return base64.encode(Buffer.from(String(res)));
+        }
+    };
+
+    const handleBuildSmartWalletTx = async () => {
+        setLocalError(null);
+        setErrorCategory(null);
+        setRpcLogs(null);
+        setLastBuiltSmartWalletTxB64(null);
+        try {
+            const ix = parseSingleInstruction();
+            const preErr = validateIfSystemTransfer(ix) || validateIfSplToken(ix) || validateHasWalletSigner(ix);
+            if (preErr) {
+                setErrorCategory("PREVALIDATION");
+                throw new Error(preErr);
+            }
+            const payer = getPayerKey();
+            const built = await buildSmartWalletTransaction(payer, [ix]);
+            const b64 = txLikeToBase64(built);
+            setLastBuiltSmartWalletTxB64(b64);
+            console.log("Built SmartWallet TX (base64):", b64);
+        } catch (e) {
+            console.error("Build smart wallet tx failed:", e);
+            const { category, message } = classifyError(e);
+            setErrorCategory(category);
+            setLocalError(message);
+        }
+    };
+
+    const handleBuildDirectTx = async () => {
+        setLocalError(null);
+        setErrorCategory(null);
+        setRpcLogs(null);
+        setLastBuiltDirectTxB64(null);
+        try {
+            const ix = parseSingleInstruction();
+            const preErr = validateIfSystemTransfer(ix) || validateIfSplToken(ix) || validateHasWalletSigner(ix);
+            if (preErr) {
+                setErrorCategory("PREVALIDATION");
+                throw new Error(preErr);
+            }
+            const payer = getPayerKey();
+            const built = await buildDirectTransaction(payer, ix);
+            const b64 = txLikeToBase64(built);
+            setLastBuiltDirectTxB64(b64);
+            console.log("Built Direct TX (base64):", b64);
+        } catch (e) {
+            console.error("Build direct tx failed:", e);
+            const { category, message } = classifyError(e);
+            setErrorCategory(category);
+            setLocalError(message);
+        }
+    };
+
     async function connectPassk() {
         try {
             const data = await connectPasskey();
@@ -425,11 +522,8 @@ export default function WalletDemo2() {
                 </div>
             )}
 
-            <div style={{ marginTop: "40px", display: "flex", flexDirection: "column", gap: "10px", maxWidth: 700 }}>
-                <button onClick={logs} style={{ backgroundColor: "yellow" }}>
-                    logs
-                </button>
-
+            <div className="mt-8" style={{ display: "flex", flexDirection: "column", gap: "8px", maxWidth: 700 }}>
+                <p>Input instruction:</p>
                 <textarea
                     placeholder='Example 1 (Memo):\n{"programId":"MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr","keys":[],"data":"utf8:Hello from LazorKit"}\n\nExample 2 (System transfer raw data, 0.1 SOL):\n{"programId":"11111111111111111111111111111111","keys":[{"pubkey":"<from>","isSigner":true,"isWritable":true},{"pubkey":"<to>","isSigner":false,"isWritable":true}],"data":"hex:0200000000e1f50500000000"}\n\nNotes:\n- data supports prefixes: utf8:, hex:, base64: (default base64 if no prefix).\n- When keys are omitted, your fee payer may be added as a readonly signer.'
                     value={instructionJson}
@@ -437,6 +531,13 @@ export default function WalletDemo2() {
                     rows={8}
                     style={{ padding: "8px", width: "100%", border: "1px solid #ccc", borderRadius: "4px", fontFamily: "monospace" }}
                 />
+            </div>
+            <div className="border border-blue-500 p-2.5" style={{ marginTop: "40px", display: "flex", flexDirection: "column", gap: "10px", maxWidth: 700 }}>
+                <h1 className="text-3xl text-amber-600">Test signAndSendTransaction()</h1>
+                <button onClick={logs} style={{ backgroundColor: "yellow" }}>
+                    logs a ix demo
+                </button>
+
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     <label style={{ fontSize: 12 }}>RPC Endpoint (fallback for simulation)</label>
                     <input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} style={{ padding: 4, fontFamily: "monospace", border: "1px solid #ccc", borderRadius: 4 }} />
@@ -462,6 +563,72 @@ export default function WalletDemo2() {
                     <details style={{ marginTop: "12px" }}>
                         <summary>Last Instruction Debug</summary>
                         <pre style={{ fontSize: "12px", whiteSpace: "pre-wrap" }}>{JSON.stringify(lastInstructionDebug, null, 2)}</pre>
+                    </details>
+                )}
+            </div>
+
+            <div className="border border-red-500 p-2.5" style={{ marginTop: "40px", display: "flex", flexDirection: "column", gap: "10px", maxWidth: 700 }}>
+                <h1 className="text-3xl text-amber-600">Test buildSmartWalletTransaction()</h1>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <label style={{ fontSize: 12 }}>Payer (PublicKey, base58). Leave blank to use connected smart wallet.</label>
+                    <input
+                        value={payerStr}
+                        onChange={(e) => setPayerStr(e.target.value)}
+                        placeholder={smartWalletPubkey?.toBase58() || "Enter payer pubkey"}
+                        style={{ padding: 4, fontFamily: "monospace", border: "1px solid #ccc", borderRadius: 4 }}
+                    />
+                </div>
+                <button
+                    onClick={handleBuildSmartWalletTx}
+                    disabled={!instructionJson.trim()}
+                    style={{
+                        padding: "10px 16px",
+                        background: "#1976d2",
+                        borderRadius: "10px",
+                        color: "white",
+                        cursor: !instructionJson.trim() ? "not-allowed" : "pointer",
+                        alignSelf: "flex-start",
+                    }}
+                >
+                    Build Smart Wallet Transaction
+                </button>
+                {lastBuiltSmartWalletTxB64 && (
+                    <details style={{ marginTop: 12 }} open>
+                        <summary>Built SmartWallet TX (base64)</summary>
+                        <pre style={{ fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{lastBuiltSmartWalletTxB64}</pre>
+                    </details>
+                )}
+            </div>
+
+            <div className="border border-emerald-500 p-2.5" style={{ marginTop: "40px", display: "flex", flexDirection: "column", gap: "10px", maxWidth: 700 }}>
+                <h1 className="text-3xl text-emerald-600">Test buildDirectTransaction()</h1>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <label style={{ fontSize: 12 }}>Payer (PublicKey, base58). Leave blank to use connected smart wallet.</label>
+                    <input
+                        value={payerStr}
+                        onChange={(e) => setPayerStr(e.target.value)}
+                        placeholder={smartWalletPubkey?.toBase58() || "Enter payer pubkey"}
+                        style={{ padding: 4, fontFamily: "monospace", border: "1px solid #ccc", borderRadius: 4 }}
+                    />
+                </div>
+                <button
+                    onClick={handleBuildDirectTx}
+                    disabled={!instructionJson.trim()}
+                    style={{
+                        padding: "10px 16px",
+                        background: "#2e7d32",
+                        borderRadius: "10px",
+                        color: "white",
+                        cursor: !instructionJson.trim() ? "not-allowed" : "pointer",
+                        alignSelf: "flex-start",
+                    }}
+                >
+                    Build Direct Transaction
+                </button>
+                {lastBuiltDirectTxB64 && (
+                    <details style={{ marginTop: 12 }} open>
+                        <summary>Built Direct TX (base64)</summary>
+                        <pre style={{ fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{lastBuiltDirectTxB64}</pre>
                     </details>
                 )}
             </div>
